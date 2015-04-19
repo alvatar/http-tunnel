@@ -5,8 +5,11 @@ import (
 	"time"
 )
 
-var Verbose bool = true
+var verbose bool = false
 
+func SetVerbose() {
+	verbose = true
+}
 
 // Get timestamp for logging purposes
 func ts() string {
@@ -21,7 +24,7 @@ func TSPrintf(format string, a ...interface{}) {
 
 // print debug/status conditionally on having Verbose on
 func Log(format string, a ...interface{}) {
-	if Verbose {
+	if verbose {
 		TSPrintf(format, a...)
 	}
 }

@@ -14,11 +14,9 @@ import (
 	"./verbose"
 )
 
-const bufSize = 1024
-const KeyLen = 64
-
-var ReverseProxyIp string = ""
-var ReverseProxyPort int = 8888
+const (
+	bufSize = 1024
+)
 
 var (
 	listenAddr   = flag.String("listen", ":2222", "local listen address")
