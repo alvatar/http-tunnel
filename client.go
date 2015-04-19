@@ -11,11 +11,12 @@ import (
 	"net/http"
 	"time"
 
+	"./socks"
 	"./verbose"
 )
 
 const (
-	bufSize = 1024
+	bufSize = 8192
 )
 
 var (
@@ -55,6 +56,23 @@ func NewForwardProxy(listenAddr string, revProxAddr string, tickIntervalMsec int
 	}
 }
 
+func handleSocksConnection(conn net.Conn) string {
+	verbose.TSPrintf("socks connect from %s\n", conn.RemoteAddr().String())
+
+	if err := socks.HandShake(conn); err != nil {
+		log.Println("socks handshake:", err)
+		return ""
+	}
+	rawaddr, addr, err := socks.GetRequest(conn)
+	if err != nil {
+		log.Println("error getting request:", err)
+		return ""
+	}
+	log.Println("RAW ADDRESS: ", rawaddr)
+	log.Println("ADDRESS: ", addr)
+	return addr
+}
+
 func (f *ForwardProxy) ListenAndServe() error {
 	listener, err := net.Listen("tcp", f.listenAddr)
 	if err != nil {
@@ -68,12 +86,14 @@ func (f *ForwardProxy) ListenAndServe() error {
 	}
 	log.Println("accept conn", "localAddr.", conn.LocalAddr(), "remoteAddr.", conn.RemoteAddr())
 
+	targetHost := handleSocksConnection(conn)
+
 	buf := new(bytes.Buffer)
 
 	// initiate new session and read key
 	log.Println("Attempting connect HttpTun Server.", f.revProxyAddr)
 	resp, err := http.Post(
-		"http://"+f.revProxyAddr+"/create",
+		"http://" + "127.0.0.1:22" + "/create",
 		"text/plain",
 		buf)
 	if err != nil {
@@ -87,19 +107,22 @@ func (f *ForwardProxy) ListenAndServe() error {
 
 	// log.Printf("client main(): after Post('/create') we got ResponseWriter with key = '%x'", key)
 
-	// ticker to set a rate at which to hit the server
+	// ticker to set a streaming rate
 	tick := time.NewTicker(time.Duration(int64(f.tickIntervalMsec)) * time.Millisecond)
-	read := makeReadChan(conn, bufSize)
+
+	//read := makeReadChan(conn, bufSize)
 	buf.Reset()
 	sendCount := 0
 	for {
 		select {
+			/*
 		case b := <-read:
 			// fill buf here
-			verbose.Log("client: <-read of '%s'; hex:'%x' of length %d added to buffer\n", string(b), b, len(b))
-			buf.Write(b)
-			verbose.Log("client: after write to buf of len(b)=%d, buf is now length %d\n", len(b), buf.Len())
-
+			log.Println(len(b))
+			//verbose.TSPrintf("client: <-read of '%s'; hex:'%x' of length %d added to buffer\n", string(b), b, len(b))
+			//buf.Write(b)
+			//verbose.TSPrintf("client: after write to buf of len(b)=%d, buf is now length %d\n", len(b), buf.Len())
+*/
 		case <-tick.C:
 			sendCount++
 			verbose.Log("\n ====================\n client sendCount = %d\n ====================\n", sendCount)

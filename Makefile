@@ -8,7 +8,7 @@ debug:
 	go build -gcflags "-N -l" config.go client.go # N: disable optimizations, l: disable inlining
 	go build -gcflags "-N -l" config.go server.go # N: disable optimizations, l: disable inlining
 
-run:
+run: all
 	pkill -9 client-tcp-over-http || echo
 	pkill -9 server-tcp-over-http || echo
 	./server &
