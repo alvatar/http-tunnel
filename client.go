@@ -56,21 +56,49 @@ func NewForwardProxy(listenAddr string, revProxAddr string, tickIntervalMsec int
 	}
 }
 
-func handleSocksConnection(conn net.Conn) string {
+func handleSocksConnection(conn net.Conn) {
 	verbose.TSPrintf("socks connect from %s\n", conn.RemoteAddr().String())
+	closed := false
+	defer func() {
+		if !closed {
+			conn.Close()
+		}
+	}()
 
 	if err := socks.HandShake(conn); err != nil {
 		log.Println("socks handshake:", err)
-		return ""
+		return
 	}
 	rawaddr, addr, err := socks.GetRequest(conn)
 	if err != nil {
 		log.Println("error getting request:", err)
-		return ""
+		return
 	}
-	log.Println("RAW ADDRESS: ", rawaddr)
-	log.Println("ADDRESS: ", addr)
-	return addr
+
+	// Connection established message
+	_, err = conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
+	if err != nil {
+		log.Println("send connection confirmation:", err)
+		return
+	}
+
+	log.Println(rawaddr)
+
+	remote, err := net.Dial("tcp", addr)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if !closed {
+			remote.Close()
+		}
+	}()
+
+	go PipeThenClose(conn, remote, NO_TIMEOUT)
+	PipeThenClose(remote, conn, NO_TIMEOUT)
+
+	closed = true
+	log.Println("closed connection to", addr)
 }
 
 func (f *ForwardProxy) ListenAndServe() error {
@@ -86,7 +114,7 @@ func (f *ForwardProxy) ListenAndServe() error {
 	}
 	log.Println("accept conn", "localAddr.", conn.LocalAddr(), "remoteAddr.", conn.RemoteAddr())
 
-	targetHost := handleSocksConnection(conn)
+	handleSocksConnection(conn)
 
 	buf := new(bytes.Buffer)
 
