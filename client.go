@@ -56,7 +56,7 @@ func NewForwardProxy(listenAddr string, revProxAddr string, tickIntervalMsec int
 	}
 }
 
-func handleSocksConnection(conn net.Conn) {
+func handleSocksConnection(conn net.Conn, proxyAddress string) {
 	closed := false
 	defer func() {
 		if !closed {
@@ -69,6 +69,7 @@ func handleSocksConnection(conn net.Conn) {
 		return
 	}
 	rawaddr, addr, err := socks.GetRequest(conn)
+	_ = rawaddr // TODO
 	if err != nil {
 		log.Println("error getting request:", err)
 		return
@@ -81,7 +82,7 @@ func handleSocksConnection(conn net.Conn) {
 		return
 	}
 
-	log.Println(rawaddr)
+	log.Println("tunneling request to", addr, "through", proxyAddress)
 
 	remote, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -115,7 +116,7 @@ func (f *ForwardProxy) ListenAndServe() {
 			continue
 		}
 		log.Println("accept with", conn.LocalAddr(), "from ", conn.RemoteAddr())
-		go handleSocksConnection(conn)
+		go handleSocksConnection(conn, f.revProxyAddr)
 	}
 
 	// --------------- NOT REACHED

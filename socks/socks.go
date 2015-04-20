@@ -4,11 +4,11 @@
 package socks
 
 import (
-	//"encoding/binary"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
-	//"strconv"
+	"strconv"
 )
 
 const (
@@ -125,5 +125,17 @@ func GetRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 	}
 
 	rawaddr = buf[idType:reqLen]
+
+	switch buf[idType] {
+	case typeIPv4:
+		host = net.IP(buf[idIP0 : idIP0+net.IPv4len]).String()
+	case typeIPv6:
+		host = net.IP(buf[idIP0 : idIP0+net.IPv6len]).String()
+	case typeDm:
+		host = string(buf[idDm0 : idDm0+buf[idDmLen]])
+	}
+	port := binary.BigEndian.Uint16(buf[reqLen-2 : reqLen])
+	host = net.JoinHostPort(host, strconv.Itoa(int(port)))
+
 	return
 }
