@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"io"
 	"io/ioutil"
 	"flag"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"./socks"
-	//"./verbose"
 )
 
 const (
@@ -24,23 +22,6 @@ var (
 	httpAddr     = flag.String("http", fmt.Sprintf("%s:%d", ReverseProxyIp, ReverseProxyPort), "remote tunnel server")
 	tickInterval = flag.Int("tick", 250, "update interval (msec)") // orig: 250
 )
-
-
-// Take a reader, and turn it into a channel of bufSize chunks of []byte
-func makeReadChan(r io.Reader, bufSize int) chan []byte {
-	read := make(chan []byte)
-	go func() {
-		for {
-			b := make([]byte, bufSize)
-			n, err := r.Read(b)
-			if err != nil {
-				return
-			}
-			read <- b[0:n]
-		}
-	}()
-	return read
-}
 
 type ForwardProxy struct {
 	listenAddr       string
@@ -57,19 +38,11 @@ func NewForwardProxy(listenAddr string, revProxAddr string, tickIntervalMsec int
 }
 
 func handleSocksConnection(conn net.Conn, proxyAddress string) {
-	closed := false
-	defer func() {
-		if !closed {
-			conn.Close()
-		}
-	}()
-
 	if err := socks.HandShake(conn); err != nil {
 		log.Println("socks handshake:", err)
 		return
 	}
-	rawaddr, addr, err := socks.GetRequest(conn)
-	_ = rawaddr // TODO
+	_, addr, err := socks.GetRequest(conn)
 	if err != nil {
 		log.Println("error getting request:", err)
 		return
@@ -84,20 +57,13 @@ func handleSocksConnection(conn net.Conn, proxyAddress string) {
 
 	log.Println("tunneling request to", addr, "through", proxyAddress)
 
-	remote, err := net.Dial("tcp", addr)
+	remote, err := net.Dial("tcp", proxyAddress)
 	if err != nil {
 		return
 	}
-	defer func() {
-		if !closed {
-			remote.Close()
-		}
-	}()
 
-	//go PipeThenClose(conn, remote, NO_TIMEOUT)
-	//PipeThenClose(remote, conn, NO_TIMEOUT)
+	TunnelAsHTTP(conn, remote, NO_TIMEOUT)
 
-	closed = true
 	log.Println("closed connection to", addr)
 }
 
