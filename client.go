@@ -24,7 +24,7 @@ const (
 
 var (
 	listenAddr   = flag.String("listen", ":2222", "local listen address")
-	tunnelRemote = flag.String("tunnel", fmt.Sprintf("%s:%d", "127.0.0.0", 8888), "remote tunnel server")
+	tunnelRemote = flag.String("tunnel", fmt.Sprintf("%s:%d", "127.0.0.1", 8888), "remote tunnel server")
 	tickInterval = flag.Int("tick", 250, "update interval (msec)")
 )
 
@@ -45,6 +45,7 @@ func makeReadChan(r io.Reader, bufSize int) chan []byte {
 }
 
 func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
+	defer tunnelLocalConn.Close()
 	if err := socks.HandShake(tunnelLocalConn); err != nil {
 		log.Println("socks handshake:", err)
 		return
@@ -64,8 +65,23 @@ func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
 
 	log.Println("tunneling request to", targetAddr, "through", tunnelRemoteAddress)
 
-	buf := new(bytes.Buffer)
-	read := makeReadChan(tunnelLocalConn, 1024)
+	// Create the HTTP session for this connection at the other end of the tunnel -> get a Key (UUID)
+	createBuf := bytes.NewBuffer([]byte(targetAddr + "\n"))
+	resp, err := http.Post(
+		"http://"+tunnelRemoteAddress+"/connect",
+		"text/plain",
+		createBuf)
+	if err != nil {
+		log.Println("error sending CONNECT command to remote tunnel endpoint: ", err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	key, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println("error reading response: ", err.Error())
+		return
+	}
+	/*
 	_, err = tunnelLocalConn.Write([]byte(`HTTP/1.1 200 OK
 Date: Mon, 23 May 2005 22:38:34 GMT
 Server: Apache/1.3.3.7 (Unix) (Red-Hat/Linux)
@@ -85,9 +101,10 @@ Connection: close
 </body>
 </html>
 `))
-return
+        */
+	buf := new(bytes.Buffer)
+	read := makeReadChan(tunnelLocalConn, 1024)
 	tick := time.NewTicker(time.Duration(int64(*tickInterval)) * time.Millisecond)
-
 	for {
 		select {
 		case b := <-read:
@@ -96,26 +113,26 @@ return
 			if buf.Len() == 0 {
 				continue
 			}
-			req := new(bytes.Buffer)
-			buf.WriteTo(req)
+			req := bytes.NewBuffer(key)
 			resp, err := http.Post(
 				"http://"+tunnelRemoteAddress,
 				"application/octet-stream",
 				req)
-			if err != nil && err != io.EOF {
-				log.Println(err.Error())
+			if err != nil {
+				log.Println("error sending octet stream to remote tunnel endpoint: ", err.Error())
 				continue
 			}
 			defer resp.Body.Close()
-
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
-				panic(err)
+				log.Println("error reading response: ", err.Error())
+				return
 			}
 			log.Println(string(body))
 			_, err = tunnelLocalConn.Write(body)
 			if err != nil {
-				panic(err)
+				log.Println("error sending response to client application: ", err.Error())
+				return
 			}
 			tunnelLocalConn.Close()
 		}
@@ -138,6 +155,6 @@ func main() {
 			log.Println("accept:", err)
 			continue
 		}
-		go handleConnection(conn, "127.0.0.1:8888")
+		go handleConnection(conn, *tunnelRemote)
 	}
 }

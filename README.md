@@ -2,7 +2,7 @@
 
 ## A tool to tunnel TCP over HTTP with SOCKS dynamic port forwarding
 
-Based on gohttptunnel by Andrew Gerrand <adg@golang.org> and Jason E. Aten <j.e.aten@gmail.com>
+Based on: gohttptunnel by Andrew Gerrand <adg@golang.org> and Jason E. Aten <j.e.aten@gmail.com>, and Shadowsocks.
 
 ### Example usage:
 
@@ -20,7 +20,9 @@ connect via ssh to localhost:2222 on the local machine:
     ssh -p 2222 username@127.0.0.1
 
 ### Flags
-  * -http=serverAddress:8888 to point to your server.
-  * -dest=destAddr:destPort to point to your tunnel endpoint (your final target) _DEPRECATED_
-    (default is -dest=127.0.0.1:22 to connect to local sshd on the server).
-  * -tick [default 250] HTTP stream interval
+  * -listen=ip:port local tunnel endpoint (server address)
+    (default :2222)
+  * -tunnel=ip:port remote tunnel endpoint (server address)
+    (default 127.0.0.1:8888 for local testing)
+  * -tick=250 HTTP stream interval
+    (default 250)
