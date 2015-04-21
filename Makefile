@@ -1,8 +1,8 @@
 .phony: all debug run
 
 all:
-	go build client.go config.go buffer.go pipe.go
-	go build server.go config.go buffer.go pipe.go
+	go build client.go config.go buffer.go
+	go build server.go config.go buffer.go
 
 debug:
 	go build -gcflags "-N -l" config.go client.go # N: disable optimizations, l: disable inlining

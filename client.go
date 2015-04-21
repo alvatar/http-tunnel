@@ -2,47 +2,54 @@ package main
 
 import (
 	"bytes"
-	"io/ioutil"
 	"flag"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"time"
-
-	"./socks"
 )
+
 
 const (
 	bufSize = 8192
+	readTimeout = 100000
+
+	NO_TIMEOUT = iota
+	SET_TIMEOUT
 )
 
 var (
 	listenAddr   = flag.String("listen", ":2222", "local listen address")
-	httpAddr     = flag.String("http", fmt.Sprintf("%s:%d", ReverseProxyIp, ReverseProxyPort), "remote tunnel server")
-	tickInterval = flag.Int("tick", 250, "update interval (msec)") // orig: 250
+	tunnelRemote = flag.String("tunnel", fmt.Sprintf("%s:%d", "127.0.0.0", 8888), "remote tunnel server")
+	tickInterval = flag.Int("tick", 250, "update interval (msec)")
 )
 
-type ForwardProxy struct {
-	listenAddr       string
-	revProxyAddr     string
-	tickIntervalMsec int
+// Take a reader, and turn it into a channel of bufSize chunks of []byte
+func makeReadChan(r io.Reader, bufSize int) chan []byte {
+	read := make(chan []byte)
+	go func() {
+		for {
+			b := make([]byte, bufSize)
+			n, err := r.Read(b)
+			if err != nil {
+				return
+			}
+			read <- b[0:n]
+		}
+	}()
+	return read
 }
 
-func NewForwardProxy(listenAddr string, revProxAddr string, tickIntervalMsec int) *ForwardProxy {
-	return &ForwardProxy{
-		listenAddr:       listenAddr,
-		revProxyAddr:     revProxAddr, // http server's address
-		tickIntervalMsec: tickIntervalMsec,
-	}
-}
-
-func handleSocksConnection(conn net.Conn, proxyAddress string) {
-	if err := socks.HandShake(conn); err != nil {
+func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
+	/*
+		if err := socks.HandShake(conn); err != nil {
 		log.Println("socks handshake:", err)
 		return
 	}
-	_, addr, err := socks.GetRequest(conn)
+	_, targetAddr, err := socks.GetRequest(conn)
 	if err != nil {
 		log.Println("error getting request:", err)
 		return
@@ -55,25 +62,53 @@ func handleSocksConnection(conn net.Conn, proxyAddress string) {
 		return
 	}
 
-	log.Println("tunneling request to", addr, "through", proxyAddress)
+	log.Println("tunneling request to", targetAddr, "through", proxyAddress)
+        */
+	buf := new(bytes.Buffer)
+	read := makeReadChan(tunnelLocalConn, 1024)
 
-	remote, err := net.Dial("tcp", proxyAddress)
-	if err != nil {
-		return
+	tick := time.NewTicker(time.Duration(int64(*tickInterval)) * time.Millisecond)
+
+	for {
+		select {
+		case b := <-read:
+			buf.Write(b)
+		case <-tick.C:
+			if buf.Len() == 0 {
+				continue
+			}
+			req := new(bytes.Buffer)
+			buf.WriteTo(req)
+			log.Println("POINT 1")
+			resp, err := http.Post(
+				"http://"+tunnelRemoteAddress,
+				"application/octet-stream",
+				req)
+			if err != nil && err != io.EOF {
+				log.Println(err.Error())
+				continue
+			}
+			defer resp.Body.Close()
+			log.Println("POINT 2")
+			body, err := ioutil.ReadAll(resp.Body)
+			log.Println("POINT 3")
+			if err != nil {
+				panic(err)
+			}
+			log.Println(body)
+		}
 	}
-
-	TunnelAsHTTP(conn, remote, NO_TIMEOUT)
-
-	log.Println("closed connection to", addr)
 }
 
-func (f *ForwardProxy) ListenAndServe() {
-	listener, err := net.Listen("tcp", f.listenAddr)
+func main() {
+	flag.Parse()
+	log.SetPrefix("http/socks client: ")
+
+	listener, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
 		log.Fatal(err)
 		panic(err)
 	}
-	log.Printf("listen on '%v', with revProxAddr '%v'", f.listenAddr, f.revProxyAddr)
 
 	for {
 		conn, err := listener.Accept()
@@ -81,44 +116,6 @@ func (f *ForwardProxy) ListenAndServe() {
 			log.Println("accept:", err)
 			continue
 		}
-		log.Println("accept with", conn.LocalAddr(), "from ", conn.RemoteAddr())
-		go handleSocksConnection(conn, f.revProxyAddr)
+		go handleConnection(conn, "127.0.0.1:8888")
 	}
-
-	// --------------- NOT REACHED
-
-	buf := new(bytes.Buffer)
-
-	// initiate new session and read key
-	log.Println("Attempting connect HttpTun Server.", f.revProxyAddr)
-	resp, err := http.Post(
-		"http://" + "127.0.0.1:22" + "/create",
-		"text/plain",
-		buf)
-	if err != nil {
-		panic(err)
-	}
-	key, err := ioutil.ReadAll(resp.Body) // key, err
-	log.Println(key)
-	if err != nil {
-		panic(err)
-	}
-	resp.Body.Close()
-
-	// log.Printf("client main(): after Post('/create') we got ResponseWriter with key = '%x'", key)
-
-	// ticker to set a streaming rate
-	tick := time.NewTicker(time.Duration(int64(f.tickIntervalMsec)) * time.Millisecond)
-	log.Println(tick)
-
-	//read := makeReadChan(conn, bufSize)
-	//buf.Reset()
-}
-
-func main() {
-	flag.Parse()
-	log.SetPrefix("tun.client: ")
-
-	f := NewForwardProxy(*listenAddr, *httpAddr, *tickInterval)
-	f.ListenAndServe()
 }

@@ -3,6 +3,6 @@ package main
 const (
 	KeyLen = 64
 
-	ReverseProxyIp string = ""
+	ReverseProxyIp string = "127.0.0.1"
 	ReverseProxyPort int = 8888
 )
