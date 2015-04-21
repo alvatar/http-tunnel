@@ -1,6 +1,6 @@
 # HTTP Tunnel
 
-## A tool to tunnel TCP over HTTP with SOCKS dynamic port forwarding
+## A proof of concept to tunnel TCP over HTTP, using a SOCKS frontend
 
 Based on: gohttptunnel by Andrew Gerrand <adg@golang.org> and Jason E. Aten <j.e.aten@gmail.com>, and Shadowsocks.
 
@@ -12,7 +12,7 @@ Run 'server' at your endpoint, by default it listens on port 8888.
 
 Run 'client' on your local machine, by default it listens locally on 2222.
 
-    ./client -http=serverAddress:8888
+    ./client -tunnel=serverAddress:8888
 
 With both of them running (you must start server first), you can then
 connect via ssh to localhost:2222 on the local machine:
