@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"time"
+	"./socks"
 )
 
 
@@ -44,29 +45,47 @@ func makeReadChan(r io.Reader, bufSize int) chan []byte {
 }
 
 func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
-	/*
-		if err := socks.HandShake(conn); err != nil {
+	if err := socks.HandShake(tunnelLocalConn); err != nil {
 		log.Println("socks handshake:", err)
 		return
 	}
-	_, targetAddr, err := socks.GetRequest(conn)
+	_, targetAddr, err := socks.GetRequest(tunnelLocalConn)
 	if err != nil {
 		log.Println("error getting request:", err)
 		return
 	}
 
 	// Connection established message
-	_, err = conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
+	_, err = tunnelLocalConn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
 	if err != nil {
 		log.Println("send connection confirmation:", err)
 		return
 	}
 
-	log.Println("tunneling request to", targetAddr, "through", proxyAddress)
-        */
+	log.Println("tunneling request to", targetAddr, "through", tunnelRemoteAddress)
+
 	buf := new(bytes.Buffer)
 	read := makeReadChan(tunnelLocalConn, 1024)
+	_, err = tunnelLocalConn.Write([]byte(`HTTP/1.1 200 OK
+Date: Mon, 23 May 2005 22:38:34 GMT
+Server: Apache/1.3.3.7 (Unix) (Red-Hat/Linux)
+Last-Modified: Wed, 08 Jan 2003 23:11:55 GMT
+ETag: \"3f80f-1b6-3e1cb03b\"
+Content-Type: text/html; charset=UTF-8
+Content-Length: 130
+Accept-Ranges: bytes
+Connection: close
 
+<html>
+<head>
+  <title>An Example Page</title>
+</head>
+<body>
+  Hello World, this is a very simple HTML document.
+</body>
+</html>
+`))
+return
 	tick := time.NewTicker(time.Duration(int64(*tickInterval)) * time.Millisecond)
 
 	for {
@@ -79,7 +98,6 @@ func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
 			}
 			req := new(bytes.Buffer)
 			buf.WriteTo(req)
-			log.Println("POINT 1")
 			resp, err := http.Post(
 				"http://"+tunnelRemoteAddress,
 				"application/octet-stream",
@@ -89,13 +107,17 @@ func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
 				continue
 			}
 			defer resp.Body.Close()
-			log.Println("POINT 2")
+
 			body, err := ioutil.ReadAll(resp.Body)
-			log.Println("POINT 3")
 			if err != nil {
 				panic(err)
 			}
-			log.Println(body)
+			log.Println(string(body))
+			_, err = tunnelLocalConn.Write(body)
+			if err != nil {
+				panic(err)
+			}
+			tunnelLocalConn.Close()
 		}
 	}
 }
