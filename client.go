@@ -44,20 +44,20 @@ func makeReadChan(r io.Reader, bufSize int) chan []byte {
 	return read
 }
 
-func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
-	defer tunnelLocalConn.Close()
-	if err := socks.HandShake(tunnelLocalConn); err != nil {
+func handleConnection(clientConn net.Conn, tunnelRemoteAddress string) {
+	defer clientConn.Close()
+	if err := socks.HandShake(clientConn); err != nil {
 		log.Println("socks handshake:", err)
 		return
 	}
-	_, targetAddr, err := socks.GetRequest(tunnelLocalConn)
+	_, targetAddr, err := socks.GetRequest(clientConn)
 	if err != nil {
 		log.Println("error getting request:", err)
 		return
 	}
 
 	// Connection established message
-	_, err = tunnelLocalConn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
+	_, err = clientConn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
 	if err != nil {
 		log.Println("send connection confirmation:", err)
 		return
@@ -82,7 +82,7 @@ func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
 		return
 	}
 	/*
-	_, err = tunnelLocalConn.Write([]byte(`HTTP/1.1 200 OK
+	_, err = clientConn.Write([]byte(`HTTP/1.1 200 OK
 Date: Mon, 23 May 2005 22:38:34 GMT
 Server: Apache/1.3.3.7 (Unix) (Red-Hat/Linux)
 Last-Modified: Wed, 08 Jan 2003 23:11:55 GMT
@@ -103,7 +103,7 @@ Connection: close
 `))
         */
 	buf := new(bytes.Buffer)
-	read := makeReadChan(tunnelLocalConn, 1024)
+	read := makeReadChan(clientConn, 1024)
 	tick := time.NewTicker(time.Duration(int64(*tickInterval)) * time.Millisecond)
 	for {
 		select {
@@ -114,6 +114,7 @@ Connection: close
 				continue
 			}
 			req := bytes.NewBuffer(uuid)
+			buf.WriteTo(req)
 			resp, err := http.Post(
 				"http://" + tunnelRemoteAddress,
 				"application/octet-stream",
@@ -128,13 +129,12 @@ Connection: close
 				log.Println("error reading response: ", err.Error())
 				return
 			}
-			log.Println(string(body))
-			_, err = tunnelLocalConn.Write(body)
+			_, err = clientConn.Write(body)
 			if err != nil {
 				log.Println("error sending response to client application: ", err.Error())
 				return
 			}
-			tunnelLocalConn.Close()
+			clientConn.Close()
 		}
 	}
 }

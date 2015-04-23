@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-//	"io"
+	"io"
 	"io/ioutil"
 	"fmt"
 	"log"
@@ -15,13 +15,23 @@ import (
 
 const (
 	readTimeoutMsec = 1000
+	uuidLen = 36 // 36 is the length of a formatted ASCII-based RFC4122 UUID
 )
 
 var (
 	listenAddr = flag.String("http", fmt.Sprintf("%s:%d", "127.0.0.1", 8888), "tunnel server listen address")
 	connectQueue = make(chan *proxy)
+	packetQueue = make(chan proxyPacket)
 	proxyMap = make(map[string]*proxy)
 )
+
+// A struct representing the packets tunneled through a proxy connection
+type proxyPacket struct {
+	resp    http.ResponseWriter
+	request *http.Request
+	body    []byte
+	done    chan bool
+}
 
 // A struct representing a proxy connection
 type proxy struct {
@@ -36,6 +46,9 @@ type proxy struct {
 // requests sent to this server (the tunnel server side).
 func NewProxy(targetAddr string) (prx *proxy, err error) {
 	uuid, err := uuid.NewTimeBased()
+	if err != nil {
+		panic(err)
+	}
 	prx = &proxy{pktChan: make(chan proxyPacket), uuid: uuid }
 	prx.conn, err = net.Dial("tcp",targetAddr)
 	if err != nil {
@@ -45,12 +58,43 @@ func NewProxy(targetAddr string) (prx *proxy, err error) {
 	return
 }
 
-// A struct representing the packets tunneled through a proxy connection
-type proxyPacket struct {
-	resp    http.ResponseWriter
-	request *http.Request
-	body    []byte
-	done    chan bool
+// Each proxy will take care of the packets sent through with its UUID
+func (prx *proxy) handlePacket(packet proxyPacket) {
+	// Read tunneled packet and send it to real target
+	payload := packet.body[uuidLen:]
+	n, err := prx.conn.Write(payload)
+	if n != len(payload) {
+		log.Printf("incomplete writing of payload")
+	}
+	packet.request.Body.Close()
+	if err == io.EOF {
+		prx.conn = nil
+		log.Printf("EOF in proxy with UUID:", prx.uuid.String())
+		return
+	}
+
+	// Read target response
+	err = prx.conn.SetReadDeadline(time.Now().Add(time.Millisecond * readTimeoutMsec))
+	if err != nil {
+		log.Printf("error setting timeout for connection with UUID: %s %s" , prx.uuid.String(), err)
+		return
+	}
+	targetResp := make([]byte, 1<<16) // The max theoretical size of a TCP packet (lower in practice)
+	n, err = prx.conn.Read(targetResp)
+	if err != nil {
+		log.Println("error reading response from target", err)
+		return
+	}
+	log.Println(string(targetResp))
+
+	// Build response to tunnel client
+	packet.resp.Header().Set("Content-type", "application/octet-stream")
+	_, err = packet.resp.Write(targetResp[:n])
+	if err != nil {
+		log.Printf("error replying to tunnel client", err)
+	}
+
+	packet.done <- true // Signal the tunnelHandler so it can return
 }
 
 // Handle the /connect path, which will create and register a new proxy for the
@@ -69,7 +113,7 @@ func connectHandler(c http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle the action that touch globals through a channel to handle
+	// Do the actions that touch globals through a channel to handle
 	// concurrent requests
 	connectQueue <- prx
 
@@ -79,12 +123,38 @@ func connectHandler(c http.ResponseWriter, r *http.Request) {
 // Handle the /tunnel path, which tunnels a client application request maskered
 // as HTTP packets to the final destination
 func tunnelHandler(c http.ResponseWriter, r *http.Request) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Println("error reading packet from tunnel client")
+		return
+	}
+
+	packet := proxyPacket{resp: c, request: r, body: body, done: make(chan bool)}
+	// Enqueue a packet
+	packetQueue <- packet
+	// Wait for the 'done' signal. This handler will send anything written to c to the tunnel client
+	<- packet.done
 }
 
 func muxer() {
-	select {
-	case prx := <- connectQueue:
-		proxyMap[prx.uuid.String()] = prx
+	for {
+		select {
+		case prx := <- connectQueue:
+			proxyMap[prx.uuid.String()] = prx
+		case packet := <- packetQueue:
+			if len(packet.body) < uuidLen {
+				continue
+			}
+			uuid := make([]byte, uuidLen)
+			copy(uuid, packet.body)
+
+			prx, ok := proxyMap[string(uuid)]
+			if !ok {
+				log.Printf("couldn't find proxy for key = ", uuid)
+				continue
+			}
+			prx.handlePacket(packet)
+		}
 	}
 }
 
