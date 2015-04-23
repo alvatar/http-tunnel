@@ -85,7 +85,6 @@ func (prx *proxy) handlePacket(packet proxyPacket) {
 		log.Println("error reading response from target", err)
 		return
 	}
-	log.Println(string(targetResp))
 
 	// Build response to tunnel client
 	packet.resp.Header().Set("Content-type", "application/octet-stream")

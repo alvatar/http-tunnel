@@ -15,8 +15,8 @@ import (
 
 
 const (
-	bufSize = 8192
-	readTimeout = 100000
+	bufSize = 4096
+	readTimeout = 10000
 
 	NO_TIMEOUT = iota
 	SET_TIMEOUT
@@ -44,6 +44,9 @@ func makeReadChan(r io.Reader, bufSize int) chan []byte {
 	return read
 }
 
+// Handle the clien application connection. It will communicate using the SOCKS
+// protocol (which is just a handshake with two commands: connect/bind). The
+// rest of the data is passed through.
 func handleConnection(clientConn net.Conn, tunnelRemoteAddress string) {
 	defer clientConn.Close()
 	if err := socks.HandShake(clientConn); err != nil {
@@ -103,16 +106,16 @@ Connection: close
 `))
         */
 	buf := new(bytes.Buffer)
-	read := makeReadChan(clientConn, 1024)
+	read := makeReadChan(clientConn, bufSize)
 	tick := time.NewTicker(time.Duration(int64(*tickInterval)) * time.Millisecond)
 	for {
 		select {
+			// Read from the client application connection
 		case b := <-read:
 			buf.Write(b)
+			// Periodically contact the server sending the payload on behalf of the client application
 		case <-tick.C:
-			if buf.Len() == 0 {
-				continue
-			}
+			// Send a request for more data (may or may not send data as well)
 			req := bytes.NewBuffer(uuid)
 			buf.WriteTo(req)
 			resp, err := http.Post(
@@ -124,17 +127,25 @@ Connection: close
 				continue
 			}
 			defer resp.Body.Close()
+
+			// Read response from the tunnel server
 			body, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
+			// No more data to receive
+			if err == io.EOF {
+				clientConn.Close()
+				return
+			}
+			if err != nil && err != io.EOF {
 				log.Println("error reading response: ", err.Error())
 				return
 			}
+			log.Println(string(body))
+			// Send the received data to the client application
 			_, err = clientConn.Write(body)
 			if err != nil {
 				log.Println("error sending response to client application: ", err.Error())
 				return
 			}
-			clientConn.Close()
 		}
 	}
 }
@@ -143,6 +154,7 @@ func main() {
 	flag.Parse()
 	log.SetPrefix("http/socks client: ")
 
+	// Listen for client application requests
 	listener, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
 		log.Fatal(err)
@@ -150,6 +162,7 @@ func main() {
 	}
 
 	for {
+		// Handle each application requests concurrently
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Println("accept:", err)
