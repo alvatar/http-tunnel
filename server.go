@@ -23,6 +23,7 @@ var (
 	proxyMap = make(map[string]*proxy)
 )
 
+// A struct representing a proxy connection
 type proxy struct {
 	pktChan   chan proxyPacket
 	uuid      uuid.UUID         // UUID to identify the transaction (the application request)
@@ -44,6 +45,7 @@ func NewProxy(targetAddr string) (prx *proxy, err error) {
 	return
 }
 
+// A struct representing the packets tunneled through a proxy connection
 type proxyPacket struct {
 	resp    http.ResponseWriter
 	request *http.Request
@@ -67,7 +69,10 @@ func connectHandler(c http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proxyMap[prx.uuid.String()] = prx
+	// Handle the action that touch globals through a channel to handle
+	// concurrent requests
+	connectQueue <- prx
+
 	c.Write([]byte(prx.uuid.String()))
 }
 
@@ -76,9 +81,18 @@ func connectHandler(c http.ResponseWriter, r *http.Request) {
 func tunnelHandler(c http.ResponseWriter, r *http.Request) {
 }
 
+func muxer() {
+	select {
+	case prx := <- connectQueue:
+		proxyMap[prx.uuid.String()] = prx
+	}
+}
+
 func main() {
 	flag.Parse()
 	log.SetPrefix("http/socks server: ")
+
+	go muxer()
 
 	http.HandleFunc("/", tunnelHandler)
 	http.HandleFunc("/connect", connectHandler)
