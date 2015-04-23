@@ -66,9 +66,9 @@ func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
 	log.Println("tunneling request to", targetAddr, "through", tunnelRemoteAddress)
 
 	// Create the HTTP session for this connection at the other end of the tunnel -> get a Key (UUID)
-	createBuf := bytes.NewBuffer([]byte(targetAddr + "\n"))
+	createBuf := bytes.NewBuffer([]byte(targetAddr))
 	resp, err := http.Post(
-		"http://"+tunnelRemoteAddress+"/connect",
+		"http://" + tunnelRemoteAddress + "/connect",
 		"text/plain",
 		createBuf)
 	if err != nil {
@@ -76,7 +76,7 @@ func handleConnection(tunnelLocalConn net.Conn, tunnelRemoteAddress string) {
 		return
 	}
 	defer resp.Body.Close()
-	key, err := ioutil.ReadAll(resp.Body)
+	uuid, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("error reading response: ", err.Error())
 		return
@@ -113,9 +113,9 @@ Connection: close
 			if buf.Len() == 0 {
 				continue
 			}
-			req := bytes.NewBuffer(key)
+			req := bytes.NewBuffer(uuid)
 			resp, err := http.Post(
-				"http://"+tunnelRemoteAddress,
+				"http://" + tunnelRemoteAddress,
 				"application/octet-stream",
 				req)
 			if err != nil {
